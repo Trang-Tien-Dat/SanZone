@@ -11,11 +11,20 @@ const courtBookingRoutes = require('./routes/courtBookingRoutes');
 const ownerRevenueRoutes = require('./routes/ownerRevenue.routes');
 const ownerRoutes = require('./routes/owner.routes');
 
-// 👇 sửa đường dẫn cho đúng file service thuê bao (xem hướng dẫn bên dưới)
+
 const { handleSepayWebhook } = require('./services/subscriptionService');
 
 const app = express();
-app.use(cors());
+// Cho phép frontend Vercel + localhost khi dev. Nhiều domain cách nhau dấu phẩy.
+const allowedOrigins = (process.env.CLIENT_URL || "http://localhost:3000")
+  .split(",")
+  .map((s) => s.trim());
+app.use(
+  cors({
+    origin: (origin, cb) =>
+      !origin || allowedOrigins.includes(origin) ? cb(null, true) : cb(new Error("CORS blocked")),
+  })
+);
 app.use(express.json());
 
 connectDB();
@@ -25,7 +34,8 @@ app.get('/', (req, res) => res.send('SanZone API đang chạy ✅'));
 
 // ===== Webhook SePay: tự kích hoạt gói khi tiền về =====
 app.post('/webhooks/sepay', async (req, res) => {
-  if (req.headers.authorization !== `Apikey ${process.env.SEPAY_API_KEY}`) {
+  const key = process.env.SEPAY_API_KEY;
+  if (!key || req.headers.authorization !== `Apikey ${key}`) {
     console.warn('[sepay] sai API key:', req.headers.authorization);
     return res.status(401).json({ success: false, message: 'Sai API key' });
   }
