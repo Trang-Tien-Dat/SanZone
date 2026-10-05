@@ -1,0 +1,27 @@
+@import url("https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-pitch-50 text-ink antialiased;
+  }
+  :focus-visible {
+    outline: 3px solid #f5c542;
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  .bg-pitch-stripes {
+    background: repeating-linear-gradient(
+      90deg,
+      #0f4a2c 0,
+      #0f4a2c 80px,
+      #125233 80px,
+      #125233 160px
+    );
+  }
+}
