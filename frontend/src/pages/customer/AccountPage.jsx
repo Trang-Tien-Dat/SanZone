@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  ArrowLeft, Camera, Trash2, Save, Shield, Star, Plus, Pencil, Check, X, UserRound, CheckCircle2, CalendarCheck,
+  ArrowLeft, Camera, Trash2, Save, Shield, Star, Plus, Pencil, Check, X, UserRound, CheckCircle2, CalendarCheck, KeyRound,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { updateProfile, updateTeams, uploadAvatar, deleteAvatar } from "../../services/authApi";
 import { TEAM_NAME_MAX } from "../../utils/teamName";
+import ChangePasswordForm from "../../components/ChangePasswordForm";
 
 const MAX_TEAMS = 5;
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
@@ -74,6 +75,11 @@ export default function AccountPage() {
         <div className="flex flex-col gap-6">
           <TeamsPanel user={user} />
           <ProfilePanel user={user} />
+          <Panel icon={KeyRound} title="Đổi mật khẩu" subtitle="Nhập mật khẩu hiện tại để xác nhận đúng là bạn.">
+            <div className="max-w-md">
+              <ChangePasswordForm />
+            </div>
+          </Panel>
         </div>
       </main>
     </div>

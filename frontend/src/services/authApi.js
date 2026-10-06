@@ -58,3 +58,11 @@ export async function uploadAvatar(token, file) {
   if (!res.ok) throw new Error(data.message || "Tải ảnh thất bại.");
   return data;
 }
+
+// Đổi mật khẩu (khách, chủ sân, admin đều dùng)
+export const changePassword = (token, currentPassword, newPassword) =>
+  request("/auth/password", {
+    method: "PUT",
+    headers: authHeader(token),
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });

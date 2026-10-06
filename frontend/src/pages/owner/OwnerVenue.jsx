@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { ImagePlus, X, MapPin, Save, Store, UserRound, LayoutGrid, ExternalLink, CheckCircle2, AlertTriangle, Clock } from "lucide-react";
+import { ImagePlus, X, MapPin, Save, Store, UserRound, LayoutGrid, ExternalLink, CheckCircle2, AlertTriangle, Clock, KeyRound } from "lucide-react";
 import { getMyVenue, updateMyVenue, updateCourt, updateAccount } from "../../services/ownerApi";
 import { uploadVenueImages, deleteVenueImage } from "../../services/uploadApi";
 import { hasMap, mapEmbedUrl, mapOpenUrl } from "../../utils/map";
 import { Card, PageHeader, ErrorBox, EmptyState, btnPrimary, btnGhost } from "./components";
+import ChangePasswordForm from "../../components/ChangePasswordForm";
 
 const MAX_IMAGES = 5;
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
@@ -84,6 +85,9 @@ export default function OwnerVenue() {
         </div>
         <div className="flex flex-col gap-6 xl:sticky xl:top-6">
           <AccountSection account={data.account} />
+          <Section icon={KeyRound} title="Đổi mật khẩu">
+            <ChangePasswordForm />
+          </Section>
           <PreviewCard venue={data.venue} />
         </div>
       </div>

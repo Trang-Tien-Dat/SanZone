@@ -311,6 +311,27 @@ router.put("/profile", verifyToken, async (req, res) => {
   }
 });
 
+// PUT /api/auth/password  { current_password, new_password }  (mọi loại tài khoản)
+router.put("/password", verifyToken, async (req, res) => {
+  try {
+    const current = String(req.body?.current_password || "");
+    const next = String(req.body?.new_password || "");
+    if (next.length < 6) return res.status(400).json({ message: "Mật khẩu mới tối thiểu 6 ký tự." });
+    if (next === current) return res.status(400).json({ message: "Mật khẩu mới phải khác mật khẩu hiện tại." });
+
+    const user = await User.findOne({ userID: req.auth.userID }).select("+password");
+    if (!user) return res.status(404).json({ message: "Không tìm thấy tài khoản." });
+    if (!user.password || !(await bcrypt.compare(current, user.password))) {
+      return res.status(400).json({ message: "Mật khẩu hiện tại không đúng." });
+    }
+    await User.updateOne({ userID: req.auth.userID }, { $set: { password: await bcrypt.hash(next, 10) } });
+    res.json({ message: "Đã đổi mật khẩu." });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Lỗi máy chủ." });
+  }
+});
+
 // PUT /api/auth/teams  { teams: ["FC Ninh Kiều", "Đội K4821"], default: "FC Ninh Kiều" }
 router.put("/teams", verifyToken, async (req, res) => {
   try {
