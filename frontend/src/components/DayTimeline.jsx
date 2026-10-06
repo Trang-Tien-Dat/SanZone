@@ -19,12 +19,13 @@ export default function DayTimeline({ open, close, blocks, selStart, selEnd, con
         {blocks.map((b, i) => (
           <div
             key={i}
-            title={b.title ?? `${b.start_time}–${b.end_time}`}
+            title={b.linked_court ? `Bận · ${b.linked_court} (dùng chung mặt sân) ${b.start_time}–${b.end_time}` : b.title ?? `${b.start_time}–${b.end_time}`}
             onClick={onBlockClick ? () => onBlockClick(b) : undefined}
             className={`absolute inset-y-0 border-x border-white/60 ${
-              b.status === "full" ? "bg-pitch-700" : "bg-amber-400"
+              b.linked_court ? "bg-slate-400" : b.status === "full" ? "bg-pitch-700" : "bg-amber-400"
             } ${onBlockClick ? "cursor-pointer hover:brightness-110" : ""}`}
             style={{
+              ...(b.linked_court && { backgroundImage: "repeating-linear-gradient(135deg, rgba(255,255,255,.35) 0 4px, transparent 4px 9px)" }),
               left: `${pct(toMin(b.start_time))}%`,
               width: `${pct(toMin(b.end_time)) - pct(toMin(b.start_time))}%`,
             }}
@@ -56,6 +57,11 @@ export default function DayTimeline({ open, close, blocks, selStart, selEnd, con
         <span className="flex items-center gap-1.5">
           <span className="size-3 rounded-sm bg-amber-400" /> Còn nửa sân
         </span>
+        {blocks.some((b) => b.linked_court) && (
+          <span className="flex items-center gap-1.5">
+            <span className="size-3 rounded-sm bg-slate-400" /> Bận do sân ghép
+          </span>
+        )}
         {selStart != null && (
           <span className="flex items-center gap-1.5">
             <span className="size-3 rounded-sm bg-whistle" /> Giờ đang chọn

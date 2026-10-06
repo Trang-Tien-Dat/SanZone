@@ -10,6 +10,8 @@ const courtSchema = new mongoose.Schema(
     court_type: { type: String },
     price_per_hour: { type: Number, required: true },
     status: { type: String, default: 'active' },
+    // Sân ghép: sân 7/11 ghép từ các sân nhỏ hơn (court_id). Rỗng = sân riêng.
+    parts: { type: [String], default: [] },
   },
   { collection: 'courts' }
 );

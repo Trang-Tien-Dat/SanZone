@@ -47,3 +47,22 @@ export async function cancelBooking(booking_id) {
   if (!res.ok) throw new Error(data.message || "Huỷ đặt sân thất bại.");
   return data;
 }
+// Kèo nửa sân đang chờ ghép của mọi cụm sân (trang chủ)
+// -> [{ date, start_time, end_time, price, wanted_level, team_name, court_id, court_name, venue_id, venue_name, address }]
+export function getOpenMatches({ days = 7, sportId } = {}) {
+  const q = new URLSearchParams({ days: String(days), ...(sportId && { sport_id: sportId }) });
+  return request(`/court-booking/open-matches?${q}`);
+}
+
+// Sân còn trống nguyên sân trong khung giờ -> { V001: [{ court_id, court_name, court_type, price }] }
+export function findFreeCourts({ date, start, end, venueIds }) {
+  const q = new URLSearchParams({ date, start, end, venue_ids: venueIds.join(",") });
+  return request(`/court-booking/free?${q}`);
+}
+
+// Khách có đang bị chủ sân chặn đặt ở cụm sân này không -> { blocked, until, message }
+export function getBlockStatus(token, venueId) {
+  return request(`/court-booking/blocked?venue_id=${encodeURIComponent(venueId)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}

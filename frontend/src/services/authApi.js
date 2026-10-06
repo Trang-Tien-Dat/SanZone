@@ -34,3 +34,27 @@ export async function registerRequest(payload) {
      if (!res.ok) throw new Error(data.message || "Đăng ký thất bại");
      return data;
    }
+// ---------- Sân yêu thích (wishlist) ----------
+const authHeader = (token) => ({ Authorization: `Bearer ${token}` });
+export const getFavorites = (token) => request("/auth/favorites", { headers: authHeader(token) });
+export const toggleFavorite = (token, venueId) =>
+  request(`/auth/favorites/${encodeURIComponent(venueId)}`, { method: "POST", headers: authHeader(token) });
+export const mergeFavorites = (token, venueIds) =>
+  request("/auth/favorites/merge", { method: "POST", headers: authHeader(token), body: JSON.stringify({ venue_ids: venueIds }) });
+
+// ---------- Tài khoản người dùng ----------
+// Các hàm dưới trả về { user } (user mới nhất sau khi sửa)
+export const updateProfile = (token, patch) =>
+  request("/auth/profile", { method: "PUT", headers: authHeader(token), body: JSON.stringify(patch) });
+export const updateTeams = (token, teams, defaultTeam) =>
+  request("/auth/teams", { method: "PUT", headers: authHeader(token), body: JSON.stringify({ teams, default: defaultTeam }) });
+export const deleteAvatar = (token) => request("/auth/avatar", { method: "DELETE", headers: authHeader(token) });
+export async function uploadAvatar(token, file) {
+  const fd = new FormData();
+  fd.append("avatar", file);
+  // Không đặt Content-Type: trình duyệt tự thêm boundary cho FormData
+  const res = await fetch(`${API_URL}/auth/avatar`, { method: "POST", headers: authHeader(token), body: fd });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || "Tải ảnh thất bại.");
+  return data;
+}

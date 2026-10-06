@@ -2,11 +2,12 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   User, Mail, Phone, Lock, Eye, EyeOff, X, UserRound, Building2, Check,
-  MapPin, Store, Clock, Minus, Plus, ArrowLeft, ImagePlus,
+  MapPin, Store, Clock, Minus, Plus, ArrowLeft, ImagePlus, Shield,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { ROLES, homePathForRole } from "../utils/roles";
 import { uploadVenueImages } from "../services/uploadApi";
+import { TEAM_NAME_MAX } from "../utils/teamName";
 const fieldClass =
   "flex h-12 items-center gap-2.5 rounded-lg border-[1.5px] border-edge bg-white px-3.5 transition focus-within:border-pitch-600 focus-within:ring-3 focus-within:ring-pitch-600/15";
 const inputClass =
@@ -25,13 +26,16 @@ const COURT_TYPES = [
   { court_type: "11 người", hint: "Sân lớn tiêu chuẩn", defaultPrice: 1200000 },
 ];
 
-const EMPTY_ACCOUNT = { fullName: "", email: "", phone: "", password: "", confirm: "" };
+const EMPTY_ACCOUNT = { fullName: "", team_name: "", email: "", phone: "", password: "", confirm: "" };
 const EMPTY_VENUE = { venue_name: "", address: "", phone: "", open_time: "05:00", close_time: "24:00" };
 const EMPTY_COURTS = COURT_TYPES.map((t, i) => ({
   court_type: t.court_type,
   quantity: i === 1 ? 1 : 0,
   price: t.defaultPrice, // số nguyên, luôn là giá của đúng loại sân này
+  merge: 0, // sân 7/11: ghép từ bao nhiêu sân 5 (0 = sân riêng)
 }));
+// Sân 7 / sân 11 có thể ghép từ các sân 5 (giống backend)
+const MERGE_OPTIONS = { "7 người": [0, 2, 3], "11 người": [0, 4, 6] };
 const MAX_IMAGES = 5;
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
@@ -92,6 +96,7 @@ export default function RegisterModal({ open, onClose, onSwitchToLogin, defaultR
   const setV = (key) => (e) => setVenue((v) => ({ ...v, [key]: e.target.value }));
   const setCourt = (i, patch) => setCourts((list) => list.map((c, j) => (j === i ? { ...c, ...patch } : c)));
   const totalCourts = courts.reduce((s, c) => s + c.quantity, 0);
+  const fiveCount = courts.find((c) => c.court_type === "5 người")?.quantity ?? 0;
   function addImages(e) {
     const picked = Array.from(e.target.files || []);
     e.target.value = ""; // cho phép chọn lại cùng 1 file
@@ -134,7 +139,10 @@ export default function RegisterModal({ open, onClose, onSwitchToLogin, defaultR
       if (c.quantity > 0 && !(c.price >= 50000 && c.price <= 10000000))
         return `Giá thuê/giờ sân ${c.court_type} phải từ 50.000đ đến 10.000.000đ.`;
     }
-    if (images.length === 0) return "Vui lòng thêm ít nhất 1 ảnh sân.";
+    for (const c of courts) {
+      if (c.quantity > 0 && c.merge > 0 && c.quantity * c.merge > fiveCount)
+        return `${c.quantity} sân ${c.court_type} ghép từ ${c.merge} sân 5 cần ít nhất ${c.quantity * c.merge} sân 5 (đang có ${fiveCount}).`;
+    }
     return "";
   }
 
@@ -168,6 +176,8 @@ export default function RegisterModal({ open, onClose, onSwitchToLogin, defaultR
         password: form.password,
         role_id: roleId,
       };
+      // Khách hàng: tên đội (trống -> backend tự đặt "FC <tên>")
+      if (!isOwner) payload.team_name = form.team_name.trim();
       if (isOwner) {
         payload.venue = {
           venue_name: venue.venue_name.trim(),
@@ -178,7 +188,7 @@ export default function RegisterModal({ open, onClose, onSwitchToLogin, defaultR
         };
         payload.courts = courts
           .filter((c) => c.quantity > 0)
-          .map((c) => ({ court_type: c.court_type, quantity: c.quantity, price_per_hour: c.price }));
+          .map((c) => ({ court_type: c.court_type, quantity: c.quantity, price_per_hour: c.price, merge_from: c.merge || 0 }));
       }
       const user = await register(payload);
       // Đã có token -> upload ảnh sân. Lỗi ảnh không chặn đăng ký (tài khoản đã tạo xong)
@@ -286,6 +296,31 @@ export default function RegisterModal({ open, onClose, onSwitchToLogin, defaultR
                 <User size={16} className="shrink-0 text-pitch-600" />
                 <input id="reg-name" autoComplete="name" value={form.fullName} onChange={set("fullName")} placeholder="Nguyễn Văn A" className={inputClass} />
               </div>
+
+              {!isOwner && (
+                <>
+                  <label htmlFor="reg-team" className={labelClass}>
+                    Tên đội <span className="font-normal">(không bắt buộc)</span>
+                  </label>
+                  <div className={`${fieldClass} mb-1`}>
+                    <Shield size={16} className="shrink-0 text-pitch-600" />
+                    <input
+                      id="reg-team"
+                      value={form.team_name}
+                      onChange={set("team_name")}
+                      maxLength={TEAM_NAME_MAX}
+                      placeholder="VD: FC Ninh Kiều"
+                      className={inputClass}
+                    />
+                  </div>
+                  <p className="mb-3.5 text-xs text-ink-soft">
+                    Hiện cho đội khác khi bạn mở kèo ghép nửa sân.
+                    {!form.team_name.trim() && (
+                      <> Để trống sẽ tự đặt tên dạng <b className="text-pitch-700">Đội A1234</b>.</>
+                    )}
+                  </p>
+                </>
+              )}
 
               <label htmlFor="reg-email" className={labelClass}>Email</label>
               <div className={`${fieldClass} mb-3.5`}>
@@ -418,7 +453,7 @@ export default function RegisterModal({ open, onClose, onSwitchToLogin, defaultR
                       {/* Ảnh sân */}
 <div className="mb-2 flex items-end justify-between gap-3">
   <p className="text-sm font-semibold text-ink-soft">
-    Ảnh sân <span className="font-normal">(JPG/PNG/WEBP, tối đa 5MB/ảnh)</span>
+    Ảnh sân <span className="font-normal">(không bắt buộc — có thể thêm sau trong mục "Thông tin sân")</span>
   </p>
   <p className="text-sm text-ink-soft">{images.length}/{MAX_IMAGES}</p>
 </div>
@@ -506,6 +541,33 @@ export default function RegisterModal({ open, onClose, onSwitchToLogin, defaultR
                         />
                         <span className="shrink-0 text-ink-soft">đ/giờ</span>
                       </label>
+
+                      {/* Sân 7 / 11: sân riêng hay ghép từ sân 5 */}
+                      {MERGE_OPTIONS[c.court_type] && on && (
+                        <div className="flex basis-full flex-wrap items-center gap-1.5 text-sm">
+                          <span className="mr-1 text-ink-soft">Mặt sân:</span>
+                          {MERGE_OPTIONS[c.court_type].map((n) => (
+                            <button
+                              key={n}
+                              type="button"
+                              onClick={() => setCourt(i, { merge: n })}
+                              aria-pressed={c.merge === n}
+                              className={`h-8 rounded-full border-[1.5px] px-3 text-xs font-semibold transition ${
+                                c.merge === n
+                                  ? "border-pitch-700 bg-pitch-700 text-white"
+                                  : "border-edge bg-white text-ink hover:border-pitch-600"
+                              }`}
+                            >
+                              {n ? `Ghép ${n} sân 5` : "Sân riêng"}
+                            </button>
+                          ))}
+                          {c.merge > 0 && (
+                            <span className={`text-xs ${c.quantity * c.merge > fiveCount ? "font-semibold text-red-700" : "text-ink-soft"}`}>
+                              cần {c.quantity * c.merge} sân 5 · đang có {fiveCount}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -516,9 +578,14 @@ export default function RegisterModal({ open, onClose, onSwitchToLogin, defaultR
                   Sẽ tạo:{" "}
                   {courts
                     .filter((c) => c.quantity > 0)
-                    .map((c) => `${c.quantity} sân ${c.court_type} (${formatMoney(c.price)}/giờ)`)
+                    .map(
+                      (c) =>
+                        `${c.quantity} sân ${c.court_type} (${formatMoney(c.price)}/giờ${c.merge ? `, ghép từ ${c.merge} sân 5` : ""})`
+                    )
                     .join(", ")}
                   , mở cửa {venue.open_time}–{venue.close_time}. Tên sân tự đặt kiểu "Sân 7 số 1", bạn có thể đổi sau.
+                  {courts.some((c) => c.quantity > 0 && c.merge > 0) &&
+                    " Sân ghép dùng chung mặt cỏ: đặt sân 7 thì các sân 5 bên dưới tự bận, và ngược lại."}
                 </p>
               )}
             </>

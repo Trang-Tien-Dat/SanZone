@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { LayoutDashboard, CalendarDays, CalendarPlus, Wallet, LogOut, BadgeCheck, Lock, AlertTriangle } from "lucide-react";
+import { LayoutDashboard, CalendarDays, CalendarPlus, Wallet, LogOut, BadgeCheck, Lock, AlertTriangle, Users, Store } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { getSubscription } from "../../services/ownerApi";
 
@@ -10,7 +10,9 @@ const NAV = [
   { to: "/owner", end: true, label: "Tổng quan", icon: LayoutDashboard },
   { to: "/owner/bookings", label: "Lịch đặt sân", icon: CalendarDays },
   { to: "/owner/book", label: "Đặt sân", icon: CalendarPlus },
+  { to: "/owner/customers", label: "Khách hàng", icon: Users },
   { to: "/owner/revenue", label: "Doanh thu", icon: Wallet },
+  { to: "/owner/venue", label: "Thông tin sân", icon: Store },
   { to: SUB_PATH, label: "Gói dịch vụ", icon: BadgeCheck, always: true },
 ];
 

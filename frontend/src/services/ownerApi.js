@@ -84,3 +84,35 @@ export function reportSubscriptionPaid(subscription_id) {
 
 // Tên cũ, giữ lại để file nào chưa đổi vẫn chạy
 export const getMyPitches = getMyCourts;
+/* ------------------------------ KHÁCH HÀNG ------------------------------ */
+export function getCustomers() {
+  return request("/owner/customers");
+}
+
+/* ------------------------------ THÔNG TIN SÂN & TÀI KHOẢN ------------------------------ */
+// -> { venue, account, courts }
+export function getMyVenue() {
+  return request("/owner/venue");
+}
+// patch: { venue_name, address, phone, open_time, close_time, description, map_url }
+export function updateMyVenue(patch) {
+  return request("/owner/venue", { method: "PUT", body: patch });
+}
+export function updateCourt(court_id, patch) {
+  return request(`/owner/courts/${encodeURIComponent(court_id)}`, { method: "PUT", body: patch });
+}
+export function updateAccount(patch) {
+  return request("/owner/account", { method: "PUT", body: patch });
+}
+
+/* ------------------------------ DANH SÁCH CHẶN ------------------------------ */
+export function getBlacklist() {
+  return request("/owner/blacklist");
+}
+// payload: { user_id, duration: "1w" | "1m" | "forever", reason, cancel_upcoming }
+export function blockCustomer(payload) {
+  return request("/owner/blacklist", { method: "POST", body: payload });
+}
+export function unblockCustomer(user_id) {
+  return request(`/owner/blacklist/${encodeURIComponent(user_id)}`, { method: "DELETE" });
+}

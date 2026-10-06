@@ -1,7 +1,6 @@
 const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
-console.log('[env] accept:', process.env.BANK_ACCOUNT_NO, process.env.SEPAY_ACCEPT_ACCOUNTS);
 const connectDB = require('./config/db');
 
 const sportRoutes = require('./routes/sportRoutes');

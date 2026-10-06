@@ -12,6 +12,9 @@ import OwnerBookings from "./pages/owner/OwnerBookings";
 import OwnerBookSlot from "./pages/owner/OwnerBookSlot";
 import OwnerRevenue from "./pages/owner/OwnerRevenue";
 import OwnerSubscription from "./pages/owner/OwnerSubscription";
+import OwnerCustomers from "./pages/owner/OwnerCustomers";
+import AccountPage from "./pages/customer/AccountPage";
+import OwnerVenue from "./pages/owner/OwnerVenue";
 import LogoutOnLeave from "./components/LogoutOnLeave";
 
 
@@ -67,6 +70,9 @@ function App() {
           <Route path="/" element={<HomeRoute />} />
           <Route path="/booking" element={<BookingRoute />} />
           <Route path="/my-bookings" element={<MyBookingsRoute />} />
+          <Route element={<RoleRoute allow={[ROLES.CUSTOMER]} />}>
+            <Route path="/account" element={<AccountPage />} />
+          </Route>
 
           {/* Chủ sân */}
           <Route element={<RoleRoute allow={[ROLES.OWNER]} />}>
@@ -76,6 +82,8 @@ function App() {
               <Route path="book" element={<OwnerBookSlot />} />
               <Route path="revenue" element={<OwnerRevenue />} />
               <Route path="subscription" element={<OwnerSubscription />} />
+              <Route path="customers" element={<OwnerCustomers />} />
+              <Route path="venue" element={<OwnerVenue />} />
             </Route>
           </Route>
           {/*admin */}

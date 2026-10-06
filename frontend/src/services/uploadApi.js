@@ -15,3 +15,12 @@ export async function uploadVenueImages(files) {
   if (!res.ok) throw new Error(data.message || "Tải ảnh thất bại.");
   return data.images;
 }
+export async function deleteVenueImage(publicId) {
+  const res = await fetch(`${BASE_URL}/owner/venue/images?public_id=${encodeURIComponent(publicId)}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || "Xoá ảnh thất bại.");
+  return data.images;
+}

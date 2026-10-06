@@ -10,6 +10,13 @@ const venueSchema = new mongoose.Schema(
     venue_name: { type: String, required: true },
     address: { type: String, required: true },
     phone: { type: String },
+    open_time: { type: String },
+    close_time: { type: String },
+    description: { type: String, default: "" },
+    // Google Maps: link chủ sân dán vào + toạ độ tách ra từ link (để nhúng bản đồ)
+    map_url: { type: String, default: "" },
+    lat: { type: Number, default: null },
+    lng: { type: Number, default: null },
     // Ảnh sân lưu trên Cloudinary
     images: [
       {

@@ -43,6 +43,14 @@ export function analyzeRange(blocks, start, end, type) {
   );
   if (overlapping.length === 0) return { ok: true, mode: type === "half" ? "host" : "full" };
 
+  const linkedHit = overlapping.find((b) => b.linked_court);
+  if (linkedHit) {
+    return {
+      ok: false,
+      message: `Giờ này mặt sân đang được dùng cho ${linkedHit.linked_court} (${range(linkedHit)}). Vui lòng chọn giờ hoặc sân khác.`,
+    };
+  }
+
   const list = overlapping.map(range).join(", ");
   const single = overlapping.length === 1 ? overlapping[0] : null;
   const sameRange =

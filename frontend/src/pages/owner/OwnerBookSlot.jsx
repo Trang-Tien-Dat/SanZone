@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { CalendarDays, CheckCircle2, Users, Swords, Clock, AlertCircle, User, Phone, StickyNote } from "lucide-react";
-import { getMyCourts } from "../../services/ownerApi";
+import { getMyCourts, getBookings } from "../../services/ownerApi";
 import { getDaySchedule, createBooking } from "../../services/BookingApi";
 import { TEAM_LEVELS, levelLabel } from "../../utils/TeamLevel";
 import { toMin, toHM, calcPrice, analyzeRange, formatDuration, roundK } from "../../utils/bookingTime";
@@ -10,12 +10,11 @@ import PitchIllustration from "../../components/PitchIllustration";
 import DayTimeline from "../../components/DayTimeline";
 import { PageHeader } from "./components";
 
-
-
 // ---------- helpers ----------
 const toDateStr = (d) => d.toLocaleDateString("sv-SE");
 const formatMoney = (n) => `${Number(n).toLocaleString("vi-VN")}đ`;
 const STEP = 30;
+const MATCH_DAYS = 7; // kèo chờ ghép hiển thị trong bao nhiêu ngày tới
 
 function formatDateVN(str) {
   const [y, m, d] = str.split("-").map(Number);
@@ -33,14 +32,26 @@ function addDays(n) {
   return toDateStr(d);
 }
 
+// "Hôm nay" / "Ngày mai" / "T5 08/10"
+function shortDay(str, today, tomorrow) {
+  if (str === today) return "Hôm nay";
+  if (str === tomorrow) return "Ngày mai";
+  const [y, m, d] = str.split("-").map(Number);
+  const wd = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"][new Date(y, m - 1, d).getDay()];
+  return `${wd} ${String(d).padStart(2, "0")}/${String(m).padStart(2, "0")}`;
+}
+
+// Ngày của lượt đặt. Nếu API dùng tên trường khác thì sửa ở đây.
+const dayOf = (b) => String(b.booking_date ?? b.date ?? "").slice(0, 10);
+
 const selectClass =
   "h-11 w-full rounded-lg border-[1.5px] border-edge bg-white px-3 text-[0.95rem] outline-none transition focus:border-pitch-600 focus:ring-3 focus:ring-pitch-600/15 disabled:bg-pitch-50";
 const fieldClass =
   "flex h-11 items-center gap-2.5 rounded-lg border-[1.5px] border-edge bg-white px-3.5 transition focus-within:border-pitch-600 focus-within:ring-3 focus-within:ring-pitch-600/15";
 
-function Step({ number, title, children, right }) {
+function Step({ number, title, children, right, id }) {
   return (
-    <section className="rounded-2xl border border-edge bg-white p-5 md:p-6">
+    <section id={id} className="scroll-mt-6 rounded-2xl border border-edge bg-white p-5 md:p-6">
       <div className="mb-4 flex items-center justify-between gap-3">
         <h2 className="flex items-center gap-3 text-lg font-bold">
           <span className="grid size-8 place-items-center rounded-full bg-pitch-700 text-sm font-extrabold text-white">
@@ -68,7 +79,10 @@ const EMPTY_CUSTOMER = { customer_name: "", customer_phone: "", note: "" };
 
 export default function OwnerBookSlot() {
   const { token } = useAuth();
+  const [params] = useSearchParams();
+  const initialCourtId = useRef(params.get("court_id")); // sân chọn sẵn khi mở từ lịch tuần
   const today = toDateStr(new Date());
+  const tomorrow = addDays(1);
 
   const [courts, setCourts] = useState([]);
   const [loadingCourts, setLoadingCourts] = useState(true);
@@ -76,7 +90,11 @@ export default function OwnerBookSlot() {
   const [courtId, setCourtId] = useState(null);
 
   const [bookingType, setBookingType] = useState("full"); // full | half
-  const [date, setDate] = useState(today);
+  // Cho phép mở sẵn từ lịch tuần: /owner/book?court_id=...&date=...
+  const [date, setDate] = useState(() => {
+    const d = params.get("date");
+    return d && d >= today ? d : today;
+  });
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [level, setLevel] = useState(null);
@@ -87,9 +105,14 @@ export default function OwnerBookSlot() {
   const [dayError, setDayError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
 
+  const [matchBookings, setMatchBookings] = useState([]);
+  const [loadingMatches, setLoadingMatches] = useState(true);
+
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [result, setResult] = useState(null);
+
+  const timeStepRef = useRef(null);
 
   // ----- Các sân của chủ sân -----
   useEffect(() => {
@@ -97,11 +120,22 @@ export default function OwnerBookSlot() {
       .then((list) => {
         const active = list.filter((c) => c.status !== "inactive");
         setCourts(active);
-        if (active.length > 0) setCourtId(active[0].court_id);
+        const wanted = initialCourtId.current;
+        const first = active.find((c) => c.court_id === wanted) ?? active[0];
+        if (first) setCourtId(first.court_id);
       })
       .catch((err) => setCourtsError(err.message))
       .finally(() => setLoadingCourts(false));
   }, []);
+
+  // ----- Kèo nửa sân chờ ghép của TẤT CẢ sân trong 7 ngày tới -----
+  useEffect(() => {
+    setLoadingMatches(true);
+    getBookings({ from: today, to: addDays(MATCH_DAYS - 1), court_id: "" })
+      .then(setMatchBookings)
+      .catch(() => setMatchBookings([]))
+      .finally(() => setLoadingMatches(false));
+  }, [today, reloadKey]);
 
   // ----- Giờ hoạt động + lịch đã đặt trong ngày (API chung với khách hàng) -----
   useEffect(() => {
@@ -117,14 +151,35 @@ export default function OwnerBookSlot() {
   const court = courts.find((c) => c.court_id === courtId);
   const sport = court?.sport_id;
 
+  // ----- Gom kèo chờ ghép: khung giờ chỉ có đúng 1 lượt nửa sân đang hoạt động -----
+  const nowAll = new Date().getHours() * 60 + new Date().getMinutes();
+  const openMatches = useMemo(() => {
+    const map = new Map();
+    for (const b of matchBookings) {
+      if (b.status === "cancelled") continue;
+      const d = dayOf(b);
+      const key = `${d}|${b.court_id}|${b.start_time}-${b.end_time}`;
+      const g = map.get(key) ?? { key, date: d, court_id: b.court_id, court_name: b.court_name, start_time: b.start_time, end_time: b.end_time, list: [] };
+      g.list.push(b);
+      map.set(key, g);
+    }
+    return [...map.values()]
+      .filter((g) => g.list.length === 1 && g.list[0].booking_type === "half")
+      // giờ hiện tại tính ngay lúc lọc
+      .filter((g) => g.date > today || (g.date === today && toMin(g.start_time) > new Date().getHours() * 60 + new Date().getMinutes()))
+      .map((g) => ({ ...g, host: g.list[0] }))
+      .sort((a, b) => a.date.localeCompare(b.date) || String(a.start_time).localeCompare(String(b.start_time)));
+  }, [matchBookings, today]);
+
   // ----- Giờ hoạt động -> danh sách giờ -----
   const hasSchedule = day.schedules.length > 0;
   const open = hasSchedule ? Math.min(...day.schedules.map((s) => toMin(s.start_time))) : 0;
   const close = hasSchedule ? Math.max(...day.schedules.map((s) => toMin(s.end_time))) : 0;
-  const nowMin = date === today ? new Date().getHours() * 60 + new Date().getMinutes() : -1;
+  const nowMin = date === today ? nowAll : -1;
 
   const startOptions = [];
-  for (let m = open; m + STEP <= close; m += STEP) startOptions.push(m);
+  // Chỉ hiện giờ chưa qua (hôm nay thì bỏ các giờ đã qua)
+  for (let m = open; m + STEP <= close; m += STEP) if (m > nowMin) startOptions.push(m);
   const startMin = start ? toMin(start) : null;
   const endOptions = [];
   if (startMin != null) for (let m = startMin + STEP; m <= close; m += STEP) endOptions.push(m);
@@ -143,10 +198,14 @@ export default function OwnerBookSlot() {
     if (e <= close) setEnd(toHM(e));
   }
 
-  function joinMatch(b) {
+  // Bấm 1 kèo ở đầu trang -> chọn sẵn sân, ngày, giờ, nửa sân
+  function joinMatch(m) {
+    setCourtId(m.court_id);
+    setDate(m.date);
     setBookingType("half");
-    setStart(b.start_time);
-    setEnd(b.end_time);
+    setStart(m.start_time);
+    setEnd(m.end_time);
+    setTimeout(() => timeStepRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   }
 
   function changeCourt(id) {
@@ -167,7 +226,7 @@ export default function OwnerBookSlot() {
   const price = basePrice == null ? 0 : bookingType === "half" ? roundK(basePrice / 2) : basePrice;
   const hostingHalf = rangeOk && analysis.mode === "host";
   const joining = rangeOk && analysis.mode === "join";
-  const openMatches = day.blocks.filter((b) => b.status === "half" && toMin(b.start_time) > nowMin);
+  const selectedMatchKey = bookingType === "half" && hasRange ? `${date}|${courtId}|${start}-${end}` : null;
 
   const phoneOk = !customer.customer_phone || /^0\d{9}$/.test(customer.customer_phone.trim());
   const canSubmit = rangeOk && (!hostingHalf || level) && phoneOk && !submitting;
@@ -184,7 +243,7 @@ export default function OwnerBookSlot() {
   } else if (joining) {
     statusBox = {
       tone: "ok",
-      text: `Giờ này đang có đội chờ ghép${
+      text: `${analysis.host.team_name ? `Đội ${analysis.host.team_name}` : "Có đội"} đang chờ ghép giờ này${
         analysis.host.wanted_level ? ` (tìm đội ${levelLabel(analysis.host.wanted_level).toLowerCase()})` : ""
       }. Khách của bạn sẽ vào ghép với họ.`,
     };
@@ -300,6 +359,61 @@ export default function OwnerBookSlot() {
     <>
       <PageHeader title="Đặt sân" subtitle="Đặt hộ khách gọi điện, khách vãng lai hoặc giữ sân — nguyên sân hay nửa sân đều được." />
 
+      {/* ---------- Kèo nửa sân đang chờ ghép (mọi sân) ---------- */}
+      <section className="mb-6 rounded-2xl border border-amber-300 bg-amber-50/60 p-5">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="flex items-center gap-2 text-lg font-bold text-amber-950">
+            <Swords size={18} className="text-amber-600" />
+            Kèo nửa sân đang chờ ghép
+            {!loadingMatches && openMatches.length > 0 && (
+              <span className="rounded-full bg-amber-400 px-2.5 py-0.5 text-sm font-bold text-amber-950">{openMatches.length}</span>
+            )}
+          </h2>
+         
+        </div>
+
+        {loadingMatches ? (
+          <p className="text-sm text-amber-800">Đang tải kèo...</p>
+        ) : openMatches.length === 0 ? (
+          <p className="text-sm text-amber-800">Chưa có kèo nào chờ ghép trong {MATCH_DAYS} ngày tới.</p>
+        ) : (
+          <div className="-mx-1 flex snap-x gap-3 overflow-x-auto px-1 pb-1">
+            {openMatches.map((m) => {
+              const active = selectedMatchKey === m.key;
+              return (
+                <button
+                  key={m.key}
+                  onClick={() => joinMatch(m)}
+                  aria-pressed={active}
+                  className={`w-56 shrink-0 snap-start rounded-xl border-[1.5px] bg-white p-3 text-left transition hover:-translate-y-0.5 hover:shadow-md ${
+                    active ? "border-pitch-700 ring-3 ring-pitch-600/20" : "border-amber-300 hover:border-amber-500"
+                  }`}
+                >
+                  <div className="flex items-center justify-between text-xs font-semibold">
+                    <span className={m.date === today ? "text-red-600" : "text-amber-800"}>{shortDay(m.date, today, tomorrow)}</span>
+                    <span className="text-ink-soft">{m.court_name}</span>
+                  </div>
+                  <div className="mt-1 text-xl font-extrabold text-ink tabular-nums">
+                    {m.start_time}–{m.end_time}
+                  </div>
+                  <div className="mt-1 truncate text-sm text-ink">
+                    <span className="text-ink-soft">Đội chờ:</span> <b className="text-pitch-700">{m.host.team_name || m.host.customer_name || "—"}</b>
+                  </div>
+                  <div className="mt-1.5 flex items-center justify-between">
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900">
+                      {m.host.wanted_level ? `Tìm đội ${levelLabel(m.host.wanted_level).toLowerCase()}` : "Trình độ bất kỳ"}
+                    </span>
+                    <span className={`text-xs font-bold ${active ? "text-pitch-700" : "text-amber-700"}`}>
+                      {active ? "✓ Đã chọn" : "Ghép →"}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
       <div className="grid items-start gap-6 lg:grid-cols-[1fr_340px]">
         <div className="flex flex-col gap-6">
           {/* ---------- 1. Chọn sân ---------- */}
@@ -322,15 +436,21 @@ export default function OwnerBookSlot() {
             <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
               {courts.map((c) => {
                 const active = c.court_id === courtId;
+                const waiting = openMatches.filter((m) => m.court_id === c.court_id).length;
                 return (
                   <button
                     key={c.court_id}
                     onClick={() => changeCourt(c.court_id)}
                     aria-pressed={active}
-                    className={`overflow-hidden rounded-xl border-[1.5px] text-left transition ${
+                    className={`relative overflow-hidden rounded-xl border-[1.5px] text-left transition ${
                       active ? "border-pitch-700 ring-3 ring-pitch-600/20" : "border-edge hover:border-pitch-600"
                     }`}
                   >
+                    {waiting > 0 && (
+                      <span className="absolute top-2 right-2 z-10 flex items-center gap-1 rounded-full bg-amber-400 px-2 py-0.5 text-xs font-bold text-amber-950 shadow">
+                        <Swords size={12} /> {waiting} kèo
+                      </span>
+                    )}
                     {c.image ? (
                       <img src={c.image} alt={c.court_name} className="block aspect-[5/3] w-full object-cover" />
                     ) : (
@@ -342,6 +462,11 @@ export default function OwnerBookSlot() {
                         <Users size={13} /> {c.court_type}
                         {c.venue_name && <span className="truncate">· {c.venue_name}</span>}
                       </div>
+                      {c.parts?.length > 0 && (
+                        <div className="mt-0.5 text-xs text-ink-soft">
+                          Ghép từ {c.parts.map((id) => courts.find((x) => x.court_id === id)?.court_name ?? id).join(" + ")}
+                        </div>
+                      )}
                       <div className="mt-1 text-sm font-semibold text-pitch-700">
                         Từ {formatMoney(c.price_per_hour)}/giờ
                       </div>
@@ -404,158 +529,135 @@ export default function OwnerBookSlot() {
           </Step>
 
           {/* ---------- 3. Ngày & giờ ---------- */}
-          <Step number="3" title="Chọn ngày & giờ">
-            <div className="mb-5 flex flex-wrap items-center gap-2.5">
-              <label className={fieldClass}>
-                <CalendarDays size={16} className="shrink-0 text-pitch-600" />
-                <input
-                  type="date"
-                  value={date}
-                  min={today}
-                  onChange={(e) => e.target.value && setDate(e.target.value)}
-                  className="bg-transparent text-[0.95rem] outline-none"
-                  aria-label="Ngày đá"
-                />
-              </label>
-              {[
-                { label: "Hôm nay", value: today },
-                { label: "Ngày mai", value: addDays(1) },
-                { label: "Ngày kia", value: addDays(2) },
-              ].map((q) => (
-                <button
-                  key={q.label}
-                  onClick={() => setDate(q.value)}
-                  className={`h-9 rounded-full px-3.5 text-sm font-semibold transition ${
-                    date === q.value ? "bg-pitch-700 text-white" : "bg-pitch-100 text-pitch-700 hover:bg-pitch-100/70"
-                  }`}
-                >
-                  {q.label}
-                </button>
-              ))}
-            </div>
+          <div ref={timeStepRef} className="scroll-mt-6">
+            <Step number="3" title="Chọn ngày & giờ">
+              <div className="mb-5 flex flex-wrap items-center gap-2.5">
+                <label className={fieldClass}>
+                  <CalendarDays size={16} className="shrink-0 text-pitch-600" />
+                  <input
+                    type="date"
+                    value={date}
+                    min={today}
+                    onChange={(e) => e.target.value && setDate(e.target.value)}
+                    className="bg-transparent text-[0.95rem] outline-none"
+                    aria-label="Ngày đá"
+                  />
+                </label>
+                {[
+                  { label: "Hôm nay", value: today },
+                  { label: "Ngày mai", value: tomorrow },
+                  { label: "Ngày kia", value: addDays(2) },
+                ].map((q) => (
+                  <button
+                    key={q.label}
+                    onClick={() => setDate(q.value)}
+                    className={`h-9 rounded-full px-3.5 text-sm font-semibold transition ${
+                      date === q.value ? "bg-pitch-700 text-white" : "bg-pitch-100 text-pitch-700 hover:bg-pitch-100/70"
+                    }`}
+                  >
+                    {q.label}
+                  </button>
+                ))}
+              </div>
 
-            {loadingDay && <p className="text-sm text-ink-soft">Đang tải lịch sân...</p>}
-            {dayError && <p className="text-sm font-medium text-red-700">Lỗi: {dayError}</p>}
-            {!loadingDay && !dayError && courtId && !hasSchedule && (
-              <p className="text-sm text-ink-soft">Sân này chưa có giờ hoạt động. Thêm dữ liệu vào bảng court_schedules.</p>
-            )}
+              {loadingDay && <p className="text-sm text-ink-soft">Đang tải lịch sân...</p>}
+              {dayError && <p className="text-sm font-medium text-red-700">Lỗi: {dayError}</p>}
+              {!loadingDay && !dayError && courtId && !hasSchedule && (
+                <p className="text-sm text-ink-soft">Sân này chưa có giờ hoạt động. Thêm dữ liệu vào bảng court_schedules.</p>
+              )}
 
-            {!loadingDay && !dayError && hasSchedule && (
-              <>
-                <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-ink-soft">
-                  <Clock size={14} /> Lịch sân · {formatDateVN(date)} · mở cửa {toHM(open)}–{toHM(close)}
-                </p>
-                <DayTimeline
-                  open={open}
-                  close={close}
-                  blocks={day.blocks}
-                  selStart={hasRange ? startMin : null}
-                  selEnd={hasRange ? endMin : null}
-                  conflict={hasRange && !rangeOk}
-                />
+              {!loadingDay && !dayError && hasSchedule && (
+                <>
+                  <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-ink-soft">
+                    <Clock size={14} /> Lịch sân · {formatDateVN(date)} · mở cửa {toHM(open)}–{toHM(close)}
+                  </p>
+                  <DayTimeline
+                    open={open}
+                    close={close}
+                    blocks={day.blocks}
+                    selStart={hasRange ? startMin : null}
+                    selEnd={hasRange ? endMin : null}
+                    conflict={hasRange && !rangeOk}
+                  />
 
-                <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <label htmlFor="start-time" className="mb-1.5 block text-sm font-semibold text-ink-soft">
-                      Giờ bắt đầu
-                    </label>
-                    <select id="start-time" value={start} onChange={(e) => pickStart(e.target.value)} className={selectClass}>
-                      <option value="">-- Chọn giờ --</option>
-                      {startOptions.map((m) => (
-                        <option key={m} value={toHM(m)} disabled={m <= nowMin}>
-                          {toHM(m)}
-                          {m <= nowMin ? " (đã qua)" : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor="end-time" className="mb-1.5 block text-sm font-semibold text-ink-soft">
-                      Giờ kết thúc
-                    </label>
-                    <select
-                      id="end-time"
-                      value={end}
-                      onChange={(e) => setEnd(e.target.value)}
-                      disabled={!start}
-                      className={selectClass}
-                    >
-                      <option value="">-- Chọn giờ --</option>
-                      {endOptions.map((m) => (
-                        <option key={m} value={toHM(m)}>
-                          {toHM(m)} ({formatDuration(m - startMin)})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                {start && (
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <span className="text-sm text-ink-soft">Đá trong:</span>
-                    {[60, 90, 120].map((len) => (
-                      <button
-                        key={len}
-                        onClick={() => pickDuration(len)}
-                        disabled={startMin + len > close}
-                        className={`h-8 rounded-full px-3 text-sm font-semibold transition disabled:opacity-40 ${
-                          hasRange && endMin - startMin === len
-                            ? "bg-pitch-700 text-white"
-                            : "bg-pitch-100 text-pitch-700 hover:bg-pitch-100/70"
-                        }`}
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label htmlFor="start-time" className="mb-1.5 block text-sm font-semibold text-ink-soft">
+                        Giờ bắt đầu
+                      </label>
+                      <select id="start-time" value={start} onChange={(e) => pickStart(e.target.value)} className={selectClass}>
+                        <option value="">{startOptions.length ? "-- Chọn giờ --" : "Hôm nay đã hết giờ, chọn ngày khác"}</option>
+                        {startOptions.map((m) => (
+                          <option key={m} value={toHM(m)}>
+                            {toHM(m)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label htmlFor="end-time" className="mb-1.5 block text-sm font-semibold text-ink-soft">
+                        Giờ kết thúc
+                      </label>
+                      <select
+                        id="end-time"
+                        value={end}
+                        onChange={(e) => setEnd(e.target.value)}
+                        disabled={!start}
+                        className={selectClass}
                       >
-                        {formatDuration(len)}
-                      </button>
-                    ))}
+                        <option value="">-- Chọn giờ --</option>
+                        {endOptions.map((m) => (
+                          <option key={m} value={toHM(m)}>
+                            {toHM(m)} ({formatDuration(m - startMin)})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
-                )}
 
-                <div
-                  role="status"
-                  className={`mt-4 flex items-start gap-2 rounded-lg px-3.5 py-3 text-sm font-medium ${
-                    statusBox.tone === "error"
-                      ? "bg-red-50 text-red-700"
-                      : statusBox.tone === "ok"
-                      ? "bg-pitch-100 text-pitch-700"
-                      : "bg-pitch-50 text-ink-soft"
-                  }`}
-                >
-                  {statusBox.tone === "error" ? (
-                    <AlertCircle size={17} className="mt-0.5 shrink-0" />
-                  ) : statusBox.tone === "ok" ? (
-                    <CheckCircle2 size={17} className="mt-0.5 shrink-0" />
-                  ) : (
-                    <Clock size={17} className="mt-0.5 shrink-0" />
-                  )}
-                  {statusBox.text}
-                </div>
-
-                {openMatches.length > 0 && (
-                  <div className="mt-5">
-                    <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-ink-soft">
-                      <Swords size={14} /> Kèo nửa sân đang chờ ghép
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {openMatches.map((b, i) => (
+                  {start && (
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <span className="text-sm text-ink-soft">Đá trong:</span>
+                      {[60, 90, 120].map((len) => (
                         <button
-                          key={i}
-                          onClick={() => joinMatch(b)}
-                          className="rounded-lg border-[1.5px] border-amber-400 bg-amber-50 px-3 py-2 text-left text-sm transition hover:bg-amber-100"
+                          key={len}
+                          onClick={() => pickDuration(len)}
+                          disabled={startMin + len > close}
+                          className={`h-8 rounded-full px-3 text-sm font-semibold transition disabled:opacity-40 ${
+                            hasRange && endMin - startMin === len
+                              ? "bg-pitch-700 text-white"
+                              : "bg-pitch-100 text-pitch-700 hover:bg-pitch-100/70"
+                          }`}
                         >
-                          <span className="block font-bold">
-                            {b.start_time}–{b.end_time}
-                          </span>
-                          <span className="block text-xs text-amber-800">
-                            {b.wanted_level ? `Tìm đội ${levelLabel(b.wanted_level).toLowerCase()}` : "Đang chờ ghép"}
-                          </span>
+                          {formatDuration(len)}
                         </button>
                       ))}
                     </div>
+                  )}
+
+                  <div
+                    role="status"
+                    className={`mt-4 flex items-start gap-2 rounded-lg px-3.5 py-3 text-sm font-medium ${
+                      statusBox.tone === "error"
+                        ? "bg-red-50 text-red-700"
+                        : statusBox.tone === "ok"
+                        ? "bg-pitch-100 text-pitch-700"
+                        : "bg-pitch-50 text-ink-soft"
+                    }`}
+                  >
+                    {statusBox.tone === "error" ? (
+                      <AlertCircle size={17} className="mt-0.5 shrink-0" />
+                    ) : statusBox.tone === "ok" ? (
+                      <CheckCircle2 size={17} className="mt-0.5 shrink-0" />
+                    ) : (
+                      <Clock size={17} className="mt-0.5 shrink-0" />
+                    )}
+                    {statusBox.text}
                   </div>
-                )}
-              </>
-            )}
-          </Step>
+                </>
+              )}
+            </Step>
+          </div>
 
           {/* ---------- 4. Trình độ (chỉ khi mở kèo nửa sân) ---------- */}
           {bookingType === "half" && !joining && (
@@ -632,6 +734,7 @@ export default function OwnerBookSlot() {
             <SummaryRow label="Kiểu đặt">
               {bookingType === "full" ? "Nguyên sân" : joining ? "Nửa sân · vào ghép" : "Nửa sân"}
             </SummaryRow>
+            {joining && analysis.host?.team_name && <SummaryRow label="Ghép với đội">{analysis.host.team_name}</SummaryRow>}
             {hostingHalf && <SummaryRow label="Tìm đội">{level ? levelLabel(level) : "Chưa chọn"}</SummaryRow>}
           </div>
 
