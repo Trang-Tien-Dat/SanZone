@@ -2,12 +2,13 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   User, Mail, Phone, Lock, Eye, EyeOff, X, UserRound, Building2, Check,
-  MapPin, Store, Clock, Minus, Plus, ArrowLeft, ImagePlus, Shield,
+  MapPin, Store, Clock, Minus, Plus, ArrowLeft, ImagePlus, Shield, MailCheck,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { ROLES, homePathForRole } from "../utils/roles";
 import { uploadVenueImages } from "../services/uploadApi";
 import { TEAM_NAME_MAX } from "../utils/teamName";
+import { sendRegisterOtp } from "../services/authApi";
 const fieldClass =
   "flex h-12 items-center gap-2.5 rounded-lg border-[1.5px] border-edge bg-white px-3.5 transition focus-within:border-pitch-600 focus-within:ring-3 focus-within:ring-pitch-600/15";
 const inputClass =
@@ -28,9 +29,9 @@ const COURT_TYPES = [
 
 const EMPTY_ACCOUNT = { fullName: "", team_name: "", email: "", phone: "", password: "", confirm: "" };
 const EMPTY_VENUE = { venue_name: "", address: "", phone: "", open_time: "05:00", close_time: "24:00" };
-const EMPTY_COURTS = COURT_TYPES.map((t, i) => ({
+const EMPTY_COURTS = COURT_TYPES.map((t) => ({
   court_type: t.court_type,
-  quantity: i === 1 ? 1 : 0,
+  quantity: 0, // chủ sân tự chọn số sân, không đặt sẵn
   price: t.defaultPrice, // số nguyên, luôn là giá của đúng loại sân này
   merge: 0, // sân 7/11: ghép từ bao nhiêu sân 5 (0 = sân riêng)
 }));
@@ -65,6 +66,36 @@ export default function RegisterModal({ open, onClose, onSwitchToLogin, defaultR
   const [submitting, setSubmitting] = useState(false);
   const [images, setImages] = useState([]);
   const isOwner = roleId === ROLES.OWNER;
+  // Xác minh email bằng mã OTP trước khi tạo tài khoản
+  const [otpStep, setOtpStep] = useState(false);
+  const [otp, setOtp] = useState("");
+  const [resendIn, setResendIn] = useState(0);
+  const [sending, setSending] = useState(false);
+  const [otpInfo, setOtpInfo] = useState("");
+
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const t = setTimeout(() => setResendIn((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendIn]);
+
+  async function requestOtp() {
+    setSending(true);
+    setError("");
+    try {
+      const r = await sendRegisterOtp(form.email.trim().toLowerCase(), form.phone.trim());
+      setOtpStep(true);
+      setOtp("");
+      setOtpInfo(r.message);
+      setResendIn(r.resend_after || 60);
+      return true;
+    } catch (err) {
+      setError(err.message);
+      return false;
+    } finally {
+      setSending(false);
+    }
+  }
 
   // Mỗi lần mở: xoá dữ liệu cũ
   useEffect(() => {
@@ -75,6 +106,9 @@ export default function RegisterModal({ open, onClose, onSwitchToLogin, defaultR
     setStep(1);
     setError("");
     setShowPassword(false);
+    setOtpStep(false);
+    setOtp("");
+    setResendIn(0);
     setRoleId(defaultRole);
     setImages((prev) => {
       prev.forEach((i) => URL.revokeObjectURL(i.preview));
@@ -166,10 +200,18 @@ export default function RegisterModal({ open, onClose, onSwitchToLogin, defaultR
       if (vErr) return setError(vErr);
     }
 
+    // Chưa xác minh email -> gửi mã OTP trước
+    if (!otpStep) {
+      await requestOtp();
+      return;
+    }
+    if (!/^\d{6}$/.test(otp)) return setError("Vui lòng nhập đủ 6 số trong email.");
+
     setError("");
     setSubmitting(true);
     try {
       const payload = {
+        otp,
         fullName: form.fullName.trim(),
         email: form.email.trim(),
         phone: form.phone.trim(),
@@ -260,6 +302,54 @@ export default function RegisterModal({ open, onClose, onSwitchToLogin, defaultR
         )}
 
         <form onSubmit={handleSubmit} noValidate>
+          {otpStep ? (
+            <div className="mb-5">
+              <div className="mb-4 flex items-start gap-3 rounded-xl bg-pitch-50 p-4">
+                <span className="grid size-11 shrink-0 place-items-center rounded-full bg-pitch-700 text-white">
+                  <MailCheck size={20} />
+                </span>
+                <div className="text-sm">
+                  <p className="font-bold text-ink">Xác minh email</p>
+                  <p className="text-ink-soft">
+                    {otpInfo || "Đã gửi mã"} Mở hộp thư (xem cả mục <b>Spam / Quảng cáo</b>) và nhập mã 6 số.
+                  </p>
+                </div>
+              </div>
+              <label htmlFor="reg-otp" className={labelClass}>Mã xác minh</label>
+              <input
+                id="reg-otp"
+                autoFocus
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={otp}
+                onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                placeholder="••••••"
+                className="h-14 w-full rounded-lg border-[1.5px] border-edge bg-white text-center text-2xl font-extrabold tracking-[0.6em] text-ink outline-none transition focus:border-pitch-600 focus:ring-3 focus:ring-pitch-600/15"
+              />
+              <div className="mt-3 flex items-center justify-between text-sm">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOtpStep(false);
+                    setError("");
+                  }}
+                  className="font-semibold text-ink-soft hover:text-pitch-700"
+                >
+                  ← Sửa email
+                </button>
+                <button
+                  type="button"
+                  onClick={requestOtp}
+                  disabled={resendIn > 0 || sending}
+                  className="font-semibold text-pitch-700 hover:underline disabled:text-ink-soft disabled:no-underline"
+                >
+                  {sending ? "Đang gửi..." : resendIn > 0 ? `Gửi lại mã sau ${resendIn}s` : "Gửi lại mã"}
+                </button>
+              </div>
+            </div>
+          ) : (
+          <>
           {step === 1 || !isOwner ? (
             <>
               {/* Chọn loại tài khoản */}
@@ -591,6 +681,9 @@ export default function RegisterModal({ open, onClose, onSwitchToLogin, defaultR
             </>
           )}
 
+          </>
+          )}
+
           {error && (
             <p role="alert" className="mb-4 rounded-r-lg border-l-4 border-red-700 bg-red-50 px-3.5 py-2.5 text-sm font-medium text-red-700">
               {error}
@@ -599,12 +692,18 @@ export default function RegisterModal({ open, onClose, onSwitchToLogin, defaultR
 
           <button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || sending || (otpStep && otp.length !== 6)}
             className="flex h-12 w-full items-center justify-center rounded-lg bg-pitch-700 font-bold text-white transition hover:bg-pitch-600 active:bg-pitch-900 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {submitting
               ? "Đang tạo tài khoản..."
-              : !isOwner
+              : sending
+                ? "Đang gửi mã..."
+                : otpStep
+                  ? "Xác nhận & tạo tài khoản"
+                  : !isOwner || step === 2
+                    ? "Gửi mã xác minh email"
+                    : !isOwner
                 ? "Đăng ký khách hàng"
                 : step === 1
                   ? "Tiếp tục: thông tin sân"

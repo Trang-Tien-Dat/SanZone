@@ -66,3 +66,7 @@ export const changePassword = (token, currentPassword, newPassword) =>
     headers: authHeader(token),
     body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
   });
+
+// Gửi mã OTP xác minh email khi đăng ký -> { message, resend_after, ttl_minutes }
+export const sendRegisterOtp = (email, phone) =>
+  request("/auth/register/send-otp", { method: "POST", body: JSON.stringify({ email, phone }) });

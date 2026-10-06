@@ -8,6 +8,7 @@ const Role = require("../models/Role");
 const { verifyToken } = require("../middlewares/authMiddleware");
 const { uniqueTeamName, cleanTeamName, teamNameOf, teamsOf, MAX_TEAMS } = require("../services/teamName");
 const { cloudinary, uploadImages, uploadBuffer } = require("../config/cloudinary");
+const { sendOtp, verifyOtp } = require("../services/emailOtp");
 
 const router = express.Router();
 
@@ -168,6 +169,30 @@ function parseOwnerVenue(body) {
   return { venue: { venue_name, address, phone, open_time, close_time }, courts };
 }
 
+// POST /api/auth/register/send-otp  { email, phone } -> gửi mã 6 số về email (60s mới gửi lại được)
+router.post("/register/send-otp", async (req, res) => {
+  try {
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const phone = String(req.body?.phone || "").trim();
+    // Log ra terminal để dễ kiểm tra vì sao không nhận được mã
+    const reject = (status, message) => {
+      console.warn(`[send-otp] ${email || "(trống)"} -> từ chối: ${message}`);
+      return res.status(status).json({ message });
+    };
+    if (!EMAIL_RE.test(email)) return reject(400, "Email không hợp lệ.");
+    if (await User.exists({ email })) return reject(409, "Email này đã được đăng ký.");
+    if (phone && (await User.exists({ phone }))) return reject(409, "Số điện thoại đã được sử dụng.");
+
+    const r = await sendOtp(email, "register");
+    if (r.error) return reject(429, r.error);
+    console.log(`[send-otp] Đã gửi mã tới ${email}`);
+    res.json({ message: `Đã gửi mã xác minh tới ${email}.`, resend_after: r.resend_after, ttl_minutes: r.ttl_minutes });
+  } catch (err) {
+    console.error("[send-otp]", err);
+    res.status(500).json({ message: "Không gửi được email xác minh, vui lòng thử lại sau." });
+  }
+});
+
 // POST /api/auth/register
 // body khách hàng: { fullName, email, phone, password, role_id: 3 }
 // body chủ sân:    { ...như trên, role_id: 2,
@@ -202,6 +227,10 @@ router.post("/register", async (req, res) => {
 
     // 1) user — mọi tài khoản đều mã "U###" (venues.owner_id đang dùng mã này, vd "U002")
     // Dùng đúng bảng của model User (bảng của bạn tên "user", không phải "users")
+    // Xác minh email bằng mã OTP (gửi ở /register/send-otp)
+    const otp = await verifyOtp(email, body.otp, "register");
+    if (otp.error) return res.status(400).json({ message: otp.error, otp_error: true });
+
     const userID = makeId("U", await nextSeq(User.collection, "userID", "U"));
     const user = await User.create({
       userID,
@@ -209,6 +238,7 @@ router.post("/register", async (req, res) => {
       email,
       phone,
       role_id,
+      email_verified: true,
       // Tên đội: không nhập -> tự đặt "Đội K4821"
       team_name: cleanTeamName(body.team_name) || (await uniqueTeamName(User)),
       password: await bcrypt.hash(password, 10),
