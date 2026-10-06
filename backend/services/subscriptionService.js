@@ -5,19 +5,20 @@
  *   { subscription_id: "SUB001", owner_id: "U007", amount: 50000,
  *     period_start: "2026-10-01", period_end: "2026-10-30",
  *     status: "pending" | "paid" | "cancelled",
- *     transfer_note: "SANNGAY SUB001",
+ *     transfer_note: "SanZone SUB001",
  *     created_at, paid_at, bank_tx_id }
  *
  * Collection "bank_transactions": log mọi giao dịch tiền vào (chống xử lý trùng + tra soát)
  *   { tx_id, amount, content, subscription_id, result, received_at, raw }
  *
  * .env (backend):
- *   BANK_ID=MB
- *   BANK_ACCOUNT_NO=0123456789
+ *   BANK_ID=BIDV
+ *   BANK_ACCOUNT_NO=<so-VA>             # số in lên mã QR (BIDV: dùng số VA trong SePay)
  *   BANK_ACCOUNT_NAME=NGUYEN VAN A
+ *   SEPAY_ACCEPT_ACCOUNTS=<so-VA>,<so-TK-chinh>   # (tuỳ chọn) các số TK webhook được chấp nhận
  *   SUBSCRIPTION_FEE=50000
  *   SUBSCRIPTION_DAYS=30
- *   SEPAY_API_KEY=xxxxxxxx      # tự đặt, khai báo y hệt trong cấu hình webhook SePay
+ *   SEPAY_API_KEY=xxxxxxxx              # tự đặt, khai báo y hệt trong cấu hình webhook SePay
  */
 const mongoose = require("mongoose");
 
@@ -46,6 +47,15 @@ function bankInfo() {
     account_no: process.env.BANK_ACCOUNT_NO || "",
     account_name: process.env.BANK_ACCOUNT_NAME || "",
   };
+}
+
+// Các số tài khoản mà webhook được chấp nhận.
+// BIDV qua SePay: accountNumber = TK chính, subAccount = số VA -> phải chấp nhận cả hai.
+function acceptedAccounts() {
+  const list = [process.env.BANK_ACCOUNT_NO, ...String(process.env.SEPAY_ACCEPT_ACCOUNTS || "").split(",")]
+    .map((s) => String(s || "").trim())
+    .filter(Boolean);
+  return [...new Set(list)];
 }
 
 function qrUrl(sub) {
@@ -120,14 +130,21 @@ async function activate(s, txId) {
 
 /**
  * Webhook SePay. Body mẫu:
- *  { id, gateway, transactionDate, accountNumber, content, transferType: "in"|"out",
+ *  { id, gateway, transactionDate, accountNumber, subAccount, content, transferType: "in"|"out",
  *    transferAmount, referenceCode, description }
  * Trả về chuỗi result để ghi log.
  */
 async function handleSepayWebhook(body) {
-  const { id, accountNumber, content = "", transferType, transferAmount } = body || {};
+  const { id, accountNumber, subAccount, content = "", transferType, transferAmount } = body || {};
   if (transferType !== "in") return "ignored_out";
-  if (process.env.BANK_ACCOUNT_NO && accountNumber && accountNumber !== process.env.BANK_ACCOUNT_NO) return "ignored_account";
+
+  // Chỉ nhận tiền vào đúng tài khoản của mình (TK chính hoặc VA)
+  const accepted = acceptedAccounts();
+  const incoming = [accountNumber, subAccount].map((s) => String(s || "").trim()).filter(Boolean);
+  if (accepted.length && incoming.length && !incoming.some((a) => accepted.includes(a))) {
+    console.warn("[sepay] ignored_account", { accountNumber, subAccount, accepted });
+    return "ignored_account";
+  }
 
   const txId = String(id);
   // Chống trùng: SePay có thể gửi lại cùng giao dịch
@@ -140,7 +157,7 @@ async function handleSepayWebhook(body) {
     return result;
   };
 
-  // Ngân hàng hay bỏ dấu cách / đổi hoa thường: "SANNGAYSUB001", "sanngay sub001"
+  // Ngân hàng hay bỏ dấu cách / đổi hoa thường: "SANZONESUB001", "sanzone sub001"
   const m = /SANZONE\s*SUB(\d+)/i.exec(content);
   if (!m) return finish("no_code");
   const subscriptionId = `SUB${m[1]}`;
