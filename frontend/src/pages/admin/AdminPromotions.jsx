@@ -15,7 +15,16 @@ const EMPTY_FORM = () => ({
   end_date: addDays(todayStr(), 30),
   usage_limit: "",
   is_active: true,
+  apply_to: "all", // all | subscription | booking
+  new_owner_only: false,
+  is_public: true, // hiện trong "Chọn voucher" của chủ sân
 });
+
+const APPLY_TO = [
+  ["all", "Tất cả"],
+  ["subscription", "Phí gói chủ sân"],
+  ["booking", "Đặt sân"],
+];
 
 // Trạng thái hiển thị của 1 mã
 function stateOf(p) {
@@ -174,9 +183,17 @@ export default function AdminPromotions() {
                       {formatDateVN(p.end_date, { day: "2-digit", month: "2-digit", year: "numeric" })}
                     </p>
                     <p className="flex items-center gap-1.5">
-                      <Users2 size={13} /> Đã dùng {p.used_count ?? 0}
-                      {p.usage_limit ? ` / ${p.usage_limit}` : " · không giới hạn"}
-                      {p.min_order ? ` · đơn từ ${formatVND(p.min_order)}` : ""}
+                      <Users2 size={13} />
+                      {p.usage_limit
+                        ? `Còn ${Math.max(0, p.usage_limit - (p.used_count ?? 0))} / ${p.usage_limit} mã · đã dùng ${p.used_count ?? 0}`
+                        : `Không giới hạn số lượng · đã dùng ${p.used_count ?? 0}`}
+                    </p>
+                    <p className="flex flex-wrap items-center gap-1.5">
+                      <span className="rounded bg-slate-100 px-1.5 py-0.5 font-semibold text-slate-600">
+                        {(APPLY_TO.find(([v]) => v === (p.apply_to || "all")) || APPLY_TO[0])[1]}
+                      </span>
+                      {p.new_owner_only && <span className="rounded bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-800">Chỉ tài khoản mới</span>}
+                      {p.is_public === false && <span className="rounded bg-slate-800 px-1.5 py-0.5 font-semibold text-white">Mã ẩn</span>}
                     </p>
                   </div>
                   {used != null && (
@@ -230,35 +247,13 @@ export default function AdminPromotions() {
           <Field label="Mã khuyến mãi">
             <input value={form.code} onChange={set("code")} placeholder="VD: CHAOMUNG10" className={`${inputCls} w-full font-mono uppercase`} maxLength={20} />
           </Field>
-          <Field label="Kiểu giảm">
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                ["percent", "Theo %"],
-                ["fixed", "Số tiền"],
-              ].map(([v, l]) => (
-                <button
-                  key={v}
-                  type="button"
-                  onClick={() => setForm((f) => ({ ...f, discount_type: v }))}
-                  className={`h-10 rounded-xl border text-sm font-semibold transition ${
-                    form.discount_type === v ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-slate-200 text-slate-600 hover:border-slate-300"
-                  }`}
-                >
-                  {l}
-                </button>
-              ))}
-            </div>
+          <Field label="Giảm (%)">
+            <input type="number" min="1" max="100" value={form.discount_value} onChange={set("discount_value")} placeholder="VD: 100" className={`${inputCls} w-full`} />
           </Field>
-          <Field label={form.discount_type === "percent" ? "Giảm (%)" : "Giảm (đồng)"}>
-            <input type="number" min="0" value={form.discount_value} onChange={set("discount_value")} className={`${inputCls} w-full`} />
+          <Field label="Giảm tối đa (đồng)" hint="Để trống = không giới hạn">
+            <input type="number" min="0" value={form.max_discount} onChange={set("max_discount")} className={`${inputCls} w-full`} />
           </Field>
-          <Field label="Giảm tối đa (đồng)" hint={form.discount_type === "fixed" ? "Chỉ dùng cho giảm theo %" : "Để trống = không giới hạn"}>
-            <input type="number" min="0" value={form.max_discount} onChange={set("max_discount")} disabled={form.discount_type === "fixed"} className={`${inputCls} w-full disabled:bg-slate-50`} />
-          </Field>
-          <Field label="Đơn tối thiểu (đồng)" hint="Để trống = mọi đơn">
-            <input type="number" min="0" value={form.min_order} onChange={set("min_order")} className={`${inputCls} w-full`} />
-          </Field>
-          <Field label="Số lượt dùng tối đa" hint="Để trống = không giới hạn">
+          <Field label="Số lượng mã" hint="Phát ra bao nhiêu lượt dùng · để trống = không giới hạn">
             <input type="number" min="0" value={form.usage_limit} onChange={set("usage_limit")} className={`${inputCls} w-full`} />
           </Field>
           <Field label="Ngày bắt đầu">
@@ -266,6 +261,25 @@ export default function AdminPromotions() {
           </Field>
           <Field label="Ngày kết thúc">
             <input type="date" value={form.end_date} min={form.start_date} onChange={set("end_date")} className={`${inputCls} w-full`} />
+          </Field>
+          <Field label="Áp dụng cho">
+            <select value={form.apply_to || "all"} onChange={set("apply_to")} className={`${inputCls} w-full`}>
+              {APPLY_TO.map(([v, l]) => (
+                <option key={v} value={v}>{l}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Đối tượng" hint="Tài khoản mới = chủ sân chưa từng trả phí gói">
+            <label className="flex h-10 items-center gap-2 text-sm font-medium text-slate-700">
+              <input type="checkbox" checked={Boolean(form.new_owner_only)} onChange={set("new_owner_only")} className="h-4 w-4 accent-emerald-600" />
+              Chỉ tài khoản chủ sân mới
+            </label>
+          </Field>
+          <Field label="Hiển thị" hint="Tắt = mã ẩn, khách phải tự gõ (dùng khi đi chào hàng)" className="sm:col-span-2">
+            <label className="flex h-10 items-center gap-2 text-sm font-medium text-slate-700">
+              <input type="checkbox" checked={form.is_public !== false} onChange={set("is_public")} className="h-4 w-4 accent-emerald-600" />
+              Hiện trong danh sách "Chọn voucher" của chủ sân
+            </label>
           </Field>
           <Field label="Mô tả" className="sm:col-span-2">
             <input value={form.description} onChange={set("description")} placeholder="VD: Giảm 10% cho khách mới" className={`${inputCls} w-full`} maxLength={200} />

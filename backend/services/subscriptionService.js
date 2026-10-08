@@ -125,7 +125,10 @@ async function activate(s, txId) {
   }
   // điều kiện status: "pending" để 2 webhook trùng không kích hoạt 2 lần
   const r = await subs().updateOne({ _id: s._id, status: "pending" }, { $set: set });
-  return r.modifiedCount > 0;
+  const ok = r.modifiedCount > 0;
+  // Đếm lượt dùng mã khuyến mãi khi hoá đơn thật sự được kích hoạt
+  if (ok && s.promo_code) await col("promotions").updateOne({ code: s.promo_code }, { $inc: { used_count: 1 } });
+  return ok;
 }
 
 /**
@@ -171,4 +174,114 @@ async function handleSepayWebhook(body) {
   return finish(ok ? "activated" : "race_skipped", subscriptionId);
 }
 
-module.exports = { getOwnerSubscription, handleSepayWebhook, qrUrl, today };
+/* ---------- Mã khuyến mãi cho phí gói ---------- */
+const promos = () => col("promotions");
+const PROMO_SOURCE = (code) => `PROMO:${code}`;
+
+// Kiểm tra mã + tính tiền giảm. -> { promo, discount } | { error }
+async function checkPromo(ownerId, rawCode, baseAmount) {
+  const code = String(rawCode || "").trim().toUpperCase();
+  if (!code) return { error: "Vui lòng nhập mã khuyến mãi." };
+  const p = await promos().findOne({ code });
+  const t = today();
+  if (!p || !p.is_active) return { error: "Mã khuyến mãi không tồn tại hoặc đã tắt." };
+  if (!["subscription", "all", undefined].includes(p.apply_to)) return { error: "Mã này không áp dụng cho phí gói dịch vụ." };
+  if (p.start_date && t < p.start_date) return { error: "Mã khuyến mãi chưa đến ngày áp dụng." };
+  if (p.end_date && t > p.end_date) return { error: "Mã khuyến mãi đã hết hạn." };
+  if (p.usage_limit && (p.used_count || 0) >= p.usage_limit) return { error: "Mã khuyến mãi đã hết lượt dùng." };
+  if (p.min_order && baseAmount < p.min_order) return { error: "Hoá đơn chưa đủ giá trị tối thiểu để dùng mã này." };
+
+  const paidCount = await subs().countDocuments({ owner_id: ownerId, status: "paid" });
+  if (p.new_owner_only && paidCount > 0) return { error: "Mã này chỉ dành cho tài khoản chủ sân mới." };
+  if (await subs().findOne({ owner_id: ownerId, status: "paid", promo_code: code })) {
+    return { error: "Bạn đã dùng mã này rồi." };
+  }
+
+  let discount = p.discount_type === "percent" ? Math.round((baseAmount * p.discount_value) / 100) : Number(p.discount_value) || 0;
+  if (p.discount_type === "percent" && p.max_discount) discount = Math.min(discount, p.max_discount);
+  discount = Math.min(discount, baseAmount);
+  return { promo: p, discount };
+}
+
+/**
+ * Áp mã vào hoá đơn đang chờ. Giảm 100% -> kích hoạt gói luôn, không cần chuyển khoản.
+ * -> { ok, activated, amount, discount } | { error }
+ */
+async function applyPromo(ownerId, subscriptionId, rawCode) {
+  const s = await subs().findOne({ owner_id: ownerId, subscription_id: subscriptionId, status: "pending" });
+  if (!s) return { error: "Không tìm thấy hoá đơn đang chờ thanh toán." };
+  const base = s.base_amount ?? s.amount;
+  const r = await checkPromo(ownerId, rawCode, base);
+  if (r.error) return r;
+
+  const amount = Math.max(0, base - r.discount);
+  await subs().updateOne(
+    { _id: s._id, status: "pending" },
+    { $set: { base_amount: base, amount, discount: r.discount, promo_code: r.promo.code } }
+  );
+
+  if (amount === 0) {
+    const ok = await activate({ ...s, base_amount: base, amount, promo_code: r.promo.code }, PROMO_SOURCE(r.promo.code));
+    return { ok, activated: ok, amount, discount: r.discount };
+  }
+  return { ok: true, activated: false, amount, discount: r.discount };
+}
+
+/**
+ * Danh sách voucher hiện cho chủ sân chọn (giống ví voucher Shopee).
+ * Chỉ lấy mã đang chạy, áp dụng cho phí gói và được admin bật "hiện trong danh sách".
+ * -> [{ code, description, discount_type, discount_value, max_discount, min_order, end_date,
+ *       remaining, discount, final_amount, usable, reason }]
+ */
+async function listVouchers(ownerId, subscriptionId) {
+  const s = await subs().findOne({ owner_id: ownerId, subscription_id: subscriptionId, status: "pending" });
+  const base = s ? s.base_amount ?? s.amount : FEE();
+  const t = today();
+  const list = await promos()
+    .find({
+      is_active: true,
+      is_public: { $ne: false },
+      apply_to: { $in: ["subscription", "all", null] },
+      start_date: { $lte: t },
+      end_date: { $gte: t },
+    })
+    .project({ _id: 0 })
+    .toArray();
+
+  const out = [];
+  for (const p of list) {
+    const remaining = p.usage_limit ? Math.max(0, p.usage_limit - (p.used_count || 0)) : null; // null = không giới hạn
+    const r = await checkPromo(ownerId, p.code, base);
+    out.push({
+      code: p.code,
+      description: p.description || "",
+      discount_type: p.discount_type,
+      discount_value: p.discount_value,
+      max_discount: p.max_discount ?? null,
+      min_order: p.min_order || 0,
+      end_date: p.end_date,
+      new_owner_only: Boolean(p.new_owner_only),
+      remaining,
+      usage_limit: p.usage_limit ?? null,
+      discount: r.discount ?? 0,
+      final_amount: r.error ? base : Math.max(0, base - r.discount),
+      usable: !r.error,
+      reason: r.error || "",
+    });
+  }
+  // Dùng được + giảm nhiều nhất lên đầu, hết lượt / không đủ điều kiện xuống cuối
+  return out.sort((a, b) => Number(b.usable) - Number(a.usable) || b.discount - a.discount);
+}
+
+// Bỏ mã -> trả về giá gốc
+async function removePromo(ownerId, subscriptionId) {
+  const s = await subs().findOne({ owner_id: ownerId, subscription_id: subscriptionId, status: "pending" });
+  if (!s || !s.promo_code) return false;
+  await subs().updateOne(
+    { _id: s._id, status: "pending" },
+    { $set: { amount: s.base_amount ?? s.amount }, $unset: { promo_code: "", discount: "", base_amount: "" } }
+  );
+  return true;
+}
+
+module.exports = { getOwnerSubscription, handleSepayWebhook, qrUrl, today, applyPromo, removePromo, listVouchers };

@@ -313,7 +313,7 @@ router.get("/revenue", async (req, res) => {
  */
 function parsePromo(body) {
   const code = String(body.code || "").trim().toUpperCase();
-  const discount_type = body.discount_type === "fixed" ? "fixed" : "percent";
+  const discount_type = "percent"; // chỉ giảm theo %
   const discount_value = Number(body.discount_value);
   const num = (v) => (v === "" || v == null ? null : Number(v));
   const p = {
@@ -322,11 +322,17 @@ function parsePromo(body) {
     discount_type,
     discount_value,
     max_discount: discount_type === "percent" ? num(body.max_discount) : null,
-    min_order: num(body.min_order) ?? 0,
+    min_order: 0, // bỏ điều kiện đơn tối thiểu
     start_date: String(body.start_date || ""),
     end_date: String(body.end_date || ""),
     usage_limit: num(body.usage_limit),
     is_active: body.is_active !== false,
+    // Áp dụng cho: "subscription" = phí gói chủ sân, "booking" = tiền đặt sân, "all" = cả hai
+    apply_to: ["subscription", "booking", "all"].includes(body.apply_to) ? body.apply_to : "all",
+    // Chỉ chủ sân chưa từng trả phí gói (tài khoản mới) mới dùng được
+    new_owner_only: Boolean(body.new_owner_only),
+    // Hiện trong danh sách "Chọn voucher" của chủ sân (tắt = mã ẩn, phải tự gõ, dùng khi đi chào hàng)
+    is_public: body.is_public !== false,
   };
   if (!/^[A-Z0-9_-]{3,20}$/.test(code)) return { error: "Mã gồm 3–20 ký tự: chữ, số, - hoặc _." };
   if (!Number.isFinite(discount_value) || discount_value <= 0) return { error: "Giá trị giảm phải lớn hơn 0." };

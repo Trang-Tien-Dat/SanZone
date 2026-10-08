@@ -546,7 +546,7 @@ router.get("/mine", verifyToken, async (req, res) => {
 });
 
 // ---------- PATCH /api/court-booking/:booking_id/cancel  (khách tự huỷ) ----------
-const CANCEL_BEFORE_MIN = 120; // phải huỷ trước giờ đá ít nhất 2 tiếng
+const CANCEL_WITHIN_MIN = 60; // chỉ được tự huỷ trong 60 phút sau khi đặt
 
 router.patch("/:booking_id/cancel", verifyToken, async (req, res) => {
   try {
@@ -566,13 +566,14 @@ router.patch("/:booking_id/cancel", verifyToken, async (req, res) => {
 
     const first = details.reduce((a, b) => (toMin(a.start_time) <= toMin(b.start_time) ? a : b));
     const startAt = new Date(`${first.booking_date}T${first.start_time}:00+07:00`);
-    const minutesLeft = (startAt.getTime() - Date.now()) / 60000;
-    if (minutesLeft < CANCEL_BEFORE_MIN) {
+    if (startAt.getTime() <= Date.now()) {
+      return res.status(400).json({ message: "Đã quá giờ đá, không thể huỷ." });
+    }
+    // Chỉ được huỷ trong 1 giờ kể từ lúc đặt (vd đặt lúc 15:00 -> sau 16:00 không huỷ online được nữa)
+    const createdAt = new Date(booking.created_at || 0).getTime();
+    if (!createdAt || Date.now() - createdAt > CANCEL_WITHIN_MIN * 60000) {
       return res.status(400).json({
-        message:
-          minutesLeft <= 0
-            ? "Đã quá giờ đá, không thể huỷ."
-            : `Chỉ được huỷ trước giờ đá ít nhất ${CANCEL_BEFORE_MIN / 60} tiếng. Vui lòng liên hệ chủ sân.`,
+        message: `Chỉ được huỷ trong ${CANCEL_WITHIN_MIN} phút sau khi đặt sân. Vui lòng liên hệ chủ sân nếu cần huỷ.`,
       });
     }
 

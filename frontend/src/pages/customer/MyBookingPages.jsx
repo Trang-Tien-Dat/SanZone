@@ -36,14 +36,18 @@ function typeBadge(item) {
   }
 }
 
-// Phải huỷ trước giờ đá ít nhất 2 tiếng (khớp với backend)
-const CANCEL_BEFORE_MIN = 120;
+// Chỉ được huỷ trong 60 phút sau khi đặt và trước giờ đá (khớp với backend)
+const CANCEL_WITHIN_MIN = 60;
 
-function canCancel(item) {
-  if (item.status === "cancelled" || item.status === "completed") return false;
-  const startAt = new Date(`${item.booking_date}T${item.start_time}:00+07:00`);
-  return (startAt.getTime() - Date.now()) / 60000 >= CANCEL_BEFORE_MIN;
+// Số phút còn được huỷ (0 = hết hạn huỷ)
+function cancelMinutesLeft(item, now = Date.now()) {
+  if (item.status === "cancelled" || item.status === "completed" || !item.created_at) return 0;
+  const startAt = new Date(`${item.booking_date}T${item.start_time}:00+07:00`).getTime();
+  if (startAt <= now) return 0;
+  const deadline = Math.min(new Date(item.created_at).getTime() + CANCEL_WITHIN_MIN * 60000, startAt);
+  return Math.max(0, Math.ceil((deadline - now) / 60000));
 }
+const canCancel = (item) => cancelMinutesLeft(item) > 0;
 
 function BookingCard({ item, past, onCancel, cancelling }) {
   const d = dateParts(item.booking_date);
@@ -51,6 +55,7 @@ function BookingCard({ item, past, onCancel, cancelling }) {
   const cancelled = item.status === "cancelled";
   const duration = toMin(item.end_time) - toMin(item.start_time);
   const cancellable = !past && canCancel(item);
+  const minutesLeft = cancellable ? cancelMinutesLeft(item) : 0;
 
   return (
     <article
@@ -119,7 +124,7 @@ function BookingCard({ item, past, onCancel, cancelling }) {
                 disabled={cancelling}
                 className="inline-flex h-8 items-center gap-1 rounded-md px-2.5 text-xs font-bold text-red-700 ring-1 ring-red-700/30 transition hover:bg-red-50 disabled:opacity-50"
               >
-                <Ban size={13} /> {cancelling ? "Đang huỷ..." : "Huỷ đặt sân"}
+                <Ban size={13} /> {cancelling ? "Đang huỷ..." : `Huỷ đặt sân · còn ${minutesLeft} phút`}
               </button>
             )}
           </span>
@@ -127,7 +132,7 @@ function BookingCard({ item, past, onCancel, cancelling }) {
 
         {!past && !cancelled && !cancellable && (
           <p className="text-xs text-ink-soft">
-            Đã quá hạn huỷ online (trước giờ đá 2 tiếng). Liên hệ chủ sân nếu cần huỷ.
+            Đã hết thời gian huỷ online (chỉ được huỷ trong 1 giờ sau khi đặt). Liên hệ chủ sân nếu cần huỷ.
           </p>
         )}
       </div>
@@ -142,6 +147,12 @@ export default function MyBookingsPage({ onBack }) {
   const [error, setError] = useState("");
   const [tab, setTab] = useState("upcoming"); // upcoming | past
   const [cancellingId, setCancellingId] = useState(null);
+  // Vẽ lại mỗi 30 giây để số phút "còn được huỷ" tự giảm, hết giờ thì nút huỷ tự ẩn
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 30000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     if (!token) {
@@ -178,7 +189,7 @@ export default function MyBookingsPage({ onBack }) {
 
   // Mỗi booking_detail là một thẻ
   const items = bookings.flatMap((b) =>
-    b.details.map((d) => ({ ...d, booking_id: b.booking_id, status: b.status }))
+    b.details.map((d) => ({ ...d, booking_id: b.booking_id, status: b.status, created_at: b.created_at }))
   );
 
   const today = toDateStr(new Date());

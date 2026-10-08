@@ -116,3 +116,15 @@ export function blockCustomer(payload) {
 export function unblockCustomer(user_id) {
   return request(`/owner/blacklist/${encodeURIComponent(user_id)}`, { method: "DELETE" });
 }
+
+/* ------------------------------ MÃ KHUYẾN MÃI CHO PHÍ GÓI ------------------------------ */
+// -> trạng thái gói mới + promo_result { activated, amount, discount }
+export function applySubscriptionPromo(subscription_id, code) {
+  return request(`/owner/subscription/${encodeURIComponent(subscription_id)}/promo`, { method: "POST", body: { code } });
+}
+export function removeSubscriptionPromo(subscription_id) {
+  return request(`/owner/subscription/${encodeURIComponent(subscription_id)}/promo`, { method: "DELETE" });
+}
+export function getSubscriptionVouchers(subscription_id) {
+  return request(`/owner/subscription/${encodeURIComponent(subscription_id)}/vouchers`);
+}

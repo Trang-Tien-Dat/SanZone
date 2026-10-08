@@ -157,6 +157,36 @@ router.get("/subscription", async (req, res) => {
   }
 });
 
+/** POST /api/owner/subscription/:id/promo  { code } -> áp mã khuyến mãi (giảm 100% thì kích hoạt luôn) */
+router.post("/subscription/:id/promo", async (req, res) => {
+  try {
+    const r = await subscription.applyPromo(getOwnerId(req), req.params.id, req.body?.code);
+    if (r.error) return res.status(400).json({ message: r.error });
+    res.json({ ...(await subscription.getOwnerSubscription(getOwnerId(req))), promo_result: r });
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+/** GET /api/owner/subscription/:id/vouchers -> voucher chủ sân có thể chọn cho hoá đơn này */
+router.get("/subscription/:id/vouchers", async (req, res) => {
+  try {
+    res.json(await subscription.listVouchers(getOwnerId(req), req.params.id));
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+/** DELETE /api/owner/subscription/:id/promo -> bỏ mã, trả về giá gốc */
+router.delete("/subscription/:id/promo", async (req, res) => {
+  try {
+    await subscription.removePromo(getOwnerId(req), req.params.id);
+    res.json(await subscription.getOwnerSubscription(getOwnerId(req)));
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
 /** POST /api/owner/subscription/:id/report -> chủ sân báo "đã chuyển khoản" */
 router.post("/subscription/:id/report", async (req, res) => {
   try {
